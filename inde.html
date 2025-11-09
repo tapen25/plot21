@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リアルタイム行動認識</title>
+    <style>
+        body { display: grid; place-items: center; min-height: 100vh; font-family: sans-serif; }
+        #status { font-size: 5rem; font-weight: bold; }
+        #permissionButton { font-size: 2rem; padding: 20px; }
+    </style>
+</head>
+<body>
+    <h1>あなたの今の行動</h1>
+    <div id="status">...</div>
+    <button id="permissionButton">センサーの許可</button>
+    <pre id="debug"></pre>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        const debugDiv = document.getElementById('debug');
+        const button = document.getElementById('permissionButton');
+        let ws;
+
+        // サーバーのWebSocket URLを設定
+        // RenderのURLに合わせて 'your-app-name.onrender.com' を変更
+        const wsUrl = `wss://your-app-name.onrender.com/ws`;
+        // ローカルで試す場合 (動作しない可能性大)
+        // const wsUrl = `ws://localhost:8000/ws`;
+
+        // センサーの初期化とWebSocket接続を行う関数
+        function startSensor() {
+            // 1. WebSocket 接続
+            try {
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    debugDiv.textContent = "サーバーに接続しました。\n";
+                };
+
+                // サーバーから推論結果を受け取る
+                ws.onmessage = (event) => {
+                    statusDiv.textContent = event.data; // "stay", "walk", "jog"
+                };
+
+                ws.onclose = () => {
+                    debugDiv.textContent += "サーバーから切断されました。\n";
+                };
+
+                ws.onerror = (error) => {
+                    debugDiv.textContent += `エラー: ${error}\n`;
+                };
+
+            } catch (error) {
+                debugDiv.textContent = `WebSocket接続に失敗: ${error}\n`;
+                return;
+            }
+
+            // 2. 加速度センサー (Accelerometer) の起動
+            try {
+                // 1秒間に10回 (frequency: 10) の頻度でセンサーを起動
+                const accelerometer = new Accelerometer({ frequency: 10 });
+
+                accelerometer.onreading = () => {
+                    const data = {
+                        x: accelerometer.x,
+                        y: accelerometer.y,
+                        z: accelerometer.z
+                    };
+
+                    // WebSocketが接続状態 (OPEN) の場合のみデータを送信
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(JSON.stringify(data));
+                    }
+                };
+                
+                accelerometer.onerror = (event) => {
+                    debugDiv.textContent += `センサーエラー: ${event.error.name} ${event.error.message}\n`;
+                };
+
+                accelerometer.start();
+                debugDiv.textContent += "センサーを起動しました。\n";
+
+            } catch (error) {
+                debugDiv.textContent += `センサーの起動に失敗: ${error}\n (お使いのブラウザは対応していないか、HTTPS接続ではありません)\n`;
+            }
+        }
+
+        // --- iOS (iPhone/iPad) 向けの対応 ---
+        // iOS 13以降は、ユーザーが明示的に許可しないとセンサーにアクセスできません。
+        function requestDeviceMotionPermission() {
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            startSensor(); // 許可されたらセンサー起動
+                            button.style.display = 'none'; // ボタンを隠す
+                        } else {
+                            debugDiv.textContent = 'センサーの許可が下りませんでした。\n';
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // iOS以外、または対応していないブラウザ
+                startSensor();
+                button.style.display = 'none'; // ボタンを隠す
+            }
+        }
+
+        button.addEventListener('click', requestDeviceMotionPermission);
+
+    </script>
+</body>
+</html>
